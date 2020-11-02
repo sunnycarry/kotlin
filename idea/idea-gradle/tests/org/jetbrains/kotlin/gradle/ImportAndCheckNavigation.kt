@@ -6,12 +6,15 @@
 package org.jetbrains.kotlin.gradle
 
 import com.intellij.openapi.vfs.VirtualFile
-import com.intellij.psi.*
+import com.intellij.psi.PsiComment
+import com.intellij.psi.PsiReference
+import com.intellij.psi.PsiWhiteSpace
 import com.intellij.psi.util.PsiTreeUtil
 import com.intellij.testFramework.runInEdtAndGet
 import org.jetbrains.kotlin.idea.codeInsight.gradle.MasterPluginVersionGradleImportingTestCase
 import org.jetbrains.kotlin.idea.codeInsight.gradle.mppImportTestMinVersionForMaster
 import org.jetbrains.kotlin.idea.core.util.toPsiFile
+import org.jetbrains.kotlin.idea.test.GradleProcessOutputInterceptor
 import org.jetbrains.kotlin.idea.util.application.runReadAction
 import org.jetbrains.kotlin.psi.KtTreeVisitorVoid
 import org.jetbrains.kotlin.psi.psiUtil.startOffset
@@ -20,10 +23,15 @@ import org.junit.Test
 
 class ImportAndCheckNavigation : MasterPluginVersionGradleImportingTestCase() {
 
+    override fun setUp() {
+        super.setUp()
+        GradleProcessOutputInterceptor.install(testRootDisposable)
+    }
+
     @Test
     @PluginTargetVersions(gradleVersion = "6.0+", pluginVersion = "1.4+", gradleVersionForLatestPlugin = mppImportTestMinVersionForMaster)
     fun testNavigationToCommonizedLibrary() {
-        val files = configureAndImportProject()
+        val files = importProjectFromTestData()
 
         files.forEach { vFile ->
             val referencesToTest = vFile.collectReferencesToTest()
@@ -48,10 +56,25 @@ class ImportAndCheckNavigation : MasterPluginVersionGradleImportingTestCase() {
 
     override fun testDataDirName() = "importAndCheckNavigation"
 
-    private fun configureAndImportProject(): List<VirtualFile> {
-        val files = configureByFiles()
-        importProject()
-        return files
+    override fun handleImportFailure(errorMessage: String, errorDetails: String?) {
+        val gradleOutput = GradleProcessOutputInterceptor.getInstance()?.getOutput().orEmpty()
+        val compactErrorMessage = when (val indexOfNewLine = errorMessage.indexOf('\n')) {
+            -1 -> errorMessage
+            else -> {
+                val compactErrorMessage = errorMessage.substring(0, indexOfNewLine)
+                val theRest = errorMessage.substring(indexOfNewLine + 1)
+                if (theRest in gradleOutput) compactErrorMessage else errorMessage
+            }
+        }
+
+        val failureMessage = buildString {
+            append("Gradle import failed: ").append(compactErrorMessage).append('\n')
+            if (!errorDetails.isNullOrBlank())
+                append("Error details: ").append(errorDetails).append('\n')
+            append("Gradle process output:\n")
+            append(gradleOutput)
+        }
+        fail(failureMessage)
     }
 
     private fun VirtualFile.collectReferencesToTest(): Map<PsiReference, String> {
