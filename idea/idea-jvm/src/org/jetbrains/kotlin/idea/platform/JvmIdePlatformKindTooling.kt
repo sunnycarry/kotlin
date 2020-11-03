@@ -54,8 +54,6 @@ class JvmIdePlatformKindTooling : IdePlatformKindTooling() {
     }
 
     override fun getTestIcon(declaration: KtNamedDeclaration, descriptor: DeclarationDescriptor): Icon? {
-        if (!descriptor.isKotlinTestDeclaration()) return null
-
         val (urls, framework) = when (declaration) {
             is KtClassOrObject -> {
                 val lightClass = declaration.toLightClass() ?: return null
@@ -82,10 +80,15 @@ class JvmIdePlatformKindTooling : IdePlatformKindTooling() {
             else -> return null
         }
 
-        return if (framework != null)
-            getTestStateIcon(urls, declaration.project, strict = false, framework.icon)
-        else
-            getTestStateIcon(urls, declaration.project, strict = true)
+        if (framework != null) {
+            return getTestStateIcon(urls, declaration.project, strict = false, framework.icon)
+        }
+
+        if (!descriptor.isKotlinTestDeclaration()) {
+            return null
+        }
+
+        return getTestStateIcon(urls, declaration.project, strict = true)
     }
 
     override fun acceptsAsEntryPoint(function: KtFunction) = true
