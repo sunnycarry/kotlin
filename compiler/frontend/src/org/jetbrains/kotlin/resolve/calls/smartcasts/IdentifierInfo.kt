@@ -25,6 +25,7 @@ import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.resolve.BindingContext
 import org.jetbrains.kotlin.resolve.DescriptorEquivalenceForOverrides
 import org.jetbrains.kotlin.resolve.DescriptorUtils
+import org.jetbrains.kotlin.resolve.ModuleStructureOracle
 import org.jetbrains.kotlin.resolve.calls.callUtil.getResolvedCall
 import org.jetbrains.kotlin.resolve.calls.callUtil.isSafeCall
 import org.jetbrains.kotlin.resolve.calls.smartcasts.DataFlowValue.Kind.OTHER
@@ -138,20 +139,39 @@ internal fun getIdForStableIdentifier(
     expression: KtExpression?,
     bindingContext: BindingContext,
     containingDeclarationOrModule: DeclarationDescriptor,
-    languageVersionSettings: LanguageVersionSettings
+    languageVersionSettings: LanguageVersionSettings,
+    moduleStructureOracle: ModuleStructureOracle,
 ): IdentifierInfo {
     if (expression != null) {
         val deparenthesized = KtPsiUtil.deparenthesize(expression)
         if (expression !== deparenthesized) {
-            return getIdForStableIdentifier(deparenthesized, bindingContext, containingDeclarationOrModule, languageVersionSettings)
+            return getIdForStableIdentifier(
+                deparenthesized,
+                bindingContext,
+                containingDeclarationOrModule,
+                languageVersionSettings,
+                moduleStructureOracle,
+            )
         }
     }
     return when (expression) {
         is KtQualifiedExpression -> {
             val receiverExpression = expression.receiverExpression
             val selectorExpression = expression.selectorExpression
-            val receiverInfo = getIdForStableIdentifier(receiverExpression, bindingContext, containingDeclarationOrModule, languageVersionSettings)
-            val selectorInfo = getIdForStableIdentifier(selectorExpression, bindingContext, containingDeclarationOrModule, languageVersionSettings)
+            val receiverInfo = getIdForStableIdentifier(
+                receiverExpression,
+                bindingContext,
+                containingDeclarationOrModule,
+                languageVersionSettings,
+                moduleStructureOracle,
+            )
+            val selectorInfo = getIdForStableIdentifier(
+                selectorExpression,
+                bindingContext,
+                containingDeclarationOrModule,
+                languageVersionSettings,
+                moduleStructureOracle,
+            )
 
             qualified(
                 receiverInfo, bindingContext.getType(receiverExpression),
@@ -167,7 +187,13 @@ internal fun getIdForStableIdentifier(
                 IdentifierInfo.NO
             } else {
                 IdentifierInfo.SafeCast(
-                    getIdForStableIdentifier(subjectExpression, bindingContext, containingDeclarationOrModule, languageVersionSettings),
+                    getIdForStableIdentifier(
+                        subjectExpression,
+                        bindingContext,
+                        containingDeclarationOrModule,
+                        languageVersionSettings,
+                        moduleStructureOracle,
+                    ),
                     bindingContext.getType(subjectExpression),
                     bindingContext[BindingContext.TYPE, targetTypeReference]
                 )
@@ -175,7 +201,13 @@ internal fun getIdForStableIdentifier(
         }
 
         is KtSimpleNameExpression ->
-            getIdForSimpleNameExpression(expression, bindingContext, containingDeclarationOrModule, languageVersionSettings)
+            getIdForSimpleNameExpression(
+                expression,
+                bindingContext,
+                containingDeclarationOrModule,
+                languageVersionSettings,
+                moduleStructureOracle,
+            )
 
         is KtThisExpression -> {
             val declarationDescriptor = bindingContext.get(BindingContext.REFERENCE_TARGET, expression.instanceReference)
@@ -190,7 +222,8 @@ internal fun getIdForStableIdentifier(
                         expression.baseExpression,
                         bindingContext,
                         containingDeclarationOrModule,
-                        languageVersionSettings
+                        languageVersionSettings,
+                        moduleStructureOracle,
                     ),
                     operationType
                 )
@@ -206,7 +239,8 @@ private fun getIdForSimpleNameExpression(
     simpleNameExpression: KtSimpleNameExpression,
     bindingContext: BindingContext,
     containingDeclarationOrModule: DeclarationDescriptor,
-    languageVersionSettings: LanguageVersionSettings
+    languageVersionSettings: LanguageVersionSettings,
+    moduleStructureOracle: ModuleStructureOracle,
 ): IdentifierInfo {
     val declarationDescriptor = bindingContext.get(BindingContext.REFERENCE_TARGET, simpleNameExpression)
     return when (declarationDescriptor) {
@@ -220,7 +254,13 @@ private fun getIdForSimpleNameExpression(
             val usageModuleDescriptor = DescriptorUtils.getContainingModuleOrNull(containingDeclarationOrModule)
             val selectorInfo = IdentifierInfo.Variable(
                 declarationDescriptor,
-                declarationDescriptor.variableKind(usageModuleDescriptor, bindingContext, simpleNameExpression, languageVersionSettings),
+                declarationDescriptor.variableKind(
+                    usageModuleDescriptor,
+                    bindingContext,
+                    simpleNameExpression,
+                    languageVersionSettings,
+                    moduleStructureOracle,
+                ),
                 bindingContext[BindingContext.BOUND_INITIALIZER_VALUE, declarationDescriptor]
             )
 
@@ -267,7 +307,7 @@ private fun getIdForImplicitReceiver(receiverValue: ReceiverValue?, expression: 
 private fun getIdForThisReceiver(descriptorOfThisReceiver: DeclarationDescriptor?) = when (descriptorOfThisReceiver) {
     is CallableDescriptor -> {
         val receiverParameter = descriptorOfThisReceiver.extensionReceiverParameter
-                ?: error("'This' refers to the callable member without a receiver parameter: $descriptorOfThisReceiver")
+            ?: error("'This' refers to the callable member without a receiver parameter: $descriptorOfThisReceiver")
         IdentifierInfo.Receiver(receiverParameter.value)
     }
 

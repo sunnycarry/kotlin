@@ -14,6 +14,7 @@ import org.jetbrains.kotlin.descriptors.VariableDescriptor
 import org.jetbrains.kotlin.lexer.KtTokens
 import org.jetbrains.kotlin.psi.*
 import org.jetbrains.kotlin.resolve.BindingContext
+import org.jetbrains.kotlin.resolve.ModuleStructureOracle
 import org.jetbrains.kotlin.resolve.calls.context.ResolutionContext
 import org.jetbrains.kotlin.resolve.descriptorUtil.builtIns
 import org.jetbrains.kotlin.resolve.scopes.receivers.ExpressionReceiver
@@ -25,7 +26,10 @@ import org.jetbrains.kotlin.types.expressions.ExpressionTypingUtils
 import org.jetbrains.kotlin.types.isError
 
 // Please, avoid using this implementation explicitly. If you need DataFlowValueFactory, use injection.
-class DataFlowValueFactoryImpl constructor(private val languageVersionSettings: LanguageVersionSettings) : DataFlowValueFactory {
+class DataFlowValueFactoryImpl constructor(
+    private val languageVersionSettings: LanguageVersionSettings,
+    private val moduleStructureOracle: ModuleStructureOracle = ModuleStructureOracle.SingleModule,
+) : DataFlowValueFactory {
     // Receivers
     override fun createDataFlowValue(
         receiverValue: ReceiverValue,
@@ -60,7 +64,13 @@ class DataFlowValueFactoryImpl constructor(private val languageVersionSettings: 
     ): DataFlowValue {
         val identifierInfo = IdentifierInfo.Variable(
             variableDescriptor,
-            variableDescriptor.variableKind(usageContainingModule, bindingContext, property, languageVersionSettings),
+            variableDescriptor.variableKind(
+                usageContainingModule,
+                bindingContext,
+                property,
+                languageVersionSettings,
+                moduleStructureOracle,
+            ),
             bindingContext[BindingContext.BOUND_INITIALIZER_VALUE, variableDescriptor]
         )
         return DataFlowValue(identifierInfo, variableDescriptor.type)
@@ -89,11 +99,11 @@ class DataFlowValueFactoryImpl constructor(private val languageVersionSettings: 
             KotlinBuiltIns.isNullableNothing(type) ->
                 DataFlowValue.nullValue(containingDeclarationOrModule.builtIns) // 'null' is the only inhabitant of 'Nothing?'
 
-        // In most cases type of `E!!`-expression is strictly not nullable and we could get proper Nullability
-        // by calling `getImmanentNullability` (as it happens below).
-        //
-        // But there are some problem with types built on type parameters, e.g.
-        // fun <T : Any?> foo(x: T) = x!!.hashCode() // there no way in type system to denote that `x!!` is not nullable
+            // In most cases type of `E!!`-expression is strictly not nullable and we could get proper Nullability
+            // by calling `getImmanentNullability` (as it happens below).
+            //
+            // But there are some problem with types built on type parameters, e.g.
+            // fun <T : Any?> foo(x: T) = x!!.hashCode() // there no way in type system to denote that `x!!` is not nullable
             ExpressionTypingUtils.isExclExclExpression(KtPsiUtil.deparenthesize(expression)) ->
                 DataFlowValue(IdentifierInfo.Expression(expression), type, Nullability.NOT_NULL)
 
@@ -101,7 +111,13 @@ class DataFlowValueFactoryImpl constructor(private val languageVersionSettings: 
                 DataFlowValue(IdentifierInfo.Expression(expression, stableComplex = true), type)
 
             else -> {
-                val result = getIdForStableIdentifier(expression, bindingContext, containingDeclarationOrModule, languageVersionSettings)
+                val result = getIdForStableIdentifier(
+                    expression,
+                    bindingContext,
+                    containingDeclarationOrModule,
+                    languageVersionSettings,
+                    moduleStructureOracle,
+                )
                 DataFlowValue(if (result === IdentifierInfo.NO) IdentifierInfo.Expression(expression) else result, type)
             }
         }
